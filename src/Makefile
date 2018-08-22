@@ -9,7 +9,7 @@ OS ?= macosx
 CC := gcc
 CCPP := g++
 
-INCLUDE := -I.
+INCLUDE := -I. -I../include/
 LIBS := -L.
 
 LIBM := -lm
