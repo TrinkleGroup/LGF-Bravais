@@ -19,7 +19,7 @@ ifeq ($(OS),macosx)
 ##  LIBLAPACK := -Wl,-framework -Wl,vecLib
 #  LIBLAPACK := -framework vecLib
   LIBLAPACK := 
-  OSDEFS := -DMACOSX
+#  OSDEFS := -DMACOSX
   LIBS := -L/opt/local/lib $(LIBS)
   INCLUDE := -I/opt/local/include $(INCLUDE)
 endif
@@ -37,7 +37,7 @@ CXXFLAGS ?= -O5 -DHAVE_INLINE $(OSDEFS)
 TARGET = addlatt anal-phonon check-harm compiler difflatt discDij egf-FT elasDij \
 	elastic-greens errorDij eval-greens foldsuper fourthorder-FT \
 	func gauss-grid gauss gf-disc gf-period gf-phonon gf-polish \
-	harmonic-inter harmonic hybrid4 kptmesh magnlatt make-ball phonon \
+	hybrid4 kptmesh magnlatt make-ball \
 	phononDij phonon-DOS point-to-maple randDij real-GF scalelatt semicont sphere-tria \
 	super-poscar symm-fillin symm-harm symmetrize test-disc test-force \
 	test-gsl test-int

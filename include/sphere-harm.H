@@ -265,8 +265,8 @@ SH_workspace_type * allocate_SH_workspace (int Lmax)
     w->RsphP[l] = new double[2*l+1]; // Only calc for m=0..2*l
     w->IsphP[l] = new double[2*l+1];
   }
-  w->result_temp = new double[2*Lmax+1]; // It calcs from m=0..2*Lmax
-
+  // w->result_temp = new double[2*Lmax+1]; // It calcs from m=0..2*Lmax
+  w->result_temp = new double[gsl_sf_legendre_array_n(2*Lmax)]; // It calcs from m=0..2*Lmax
   return w;
 }
 
@@ -331,18 +331,31 @@ int eval_Ylm_expansion_R (int Lmax, double x[3], int Ndim,
   calc_angle(xv, cost, phi);
 
   // First, calc the spherical harmonic values --
+  // for (m=0; m<=2*Lmax; ++m) {
+  //   double cosm, sinm;
+  //   // exp(I*m*phi):
+  //   sinm = sin(m*phi);
+  //   cosm = cos(m*phi);
+  //   // Plm(cost):
+  //   gsl_sf_legendre_sphPlm_array(2*Lmax, m, cost, result_temp);
+  //   // Now, put in the appropriate spots:
+  //   for (l=2*Lmax; l>=m; l -= 2) {
+  //     // result_temp goes from m to Lmax
+  //     RsphP[l/2][m] = cosm*result_temp[l-m];
+  //     IsphP[l/2][m] = sinm*result_temp[l-m];
+  //   }
+  // }
+  gsl_sf_legendre_array(GSL_SF_LEGENDRE_SPHARM, 2*Lmax, cost, result_temp);
   for (m=0; m<=2*Lmax; ++m) {
     double cosm, sinm;
     // exp(I*m*phi):
     sinm = sin(m*phi);
     cosm = cos(m*phi);
-    // Plm(cost):
-    gsl_sf_legendre_sphPlm_array(2*Lmax, m, cost, result_temp);
     // Now, put in the appropriate spots:
     for (l=2*Lmax; l>=m; l -= 2) {
       // result_temp goes from m to Lmax
-      RsphP[l/2][m] = cosm*result_temp[l-m];
-      IsphP[l/2][m] = sinm*result_temp[l-m];
+      RsphP[l/2][m] = cosm*result_temp[gsl_sf_legendre_array_index(l, m)];
+      IsphP[l/2][m] = sinm*result_temp[gsl_sf_legendre_array_index(l, m)];
     }
   }
   // Now, do our sum:
