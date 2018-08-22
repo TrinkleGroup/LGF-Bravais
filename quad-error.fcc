@@ -1,0 +1,40 @@
+#!/bin/bash
+
+# Recently rewritten to calculate _both_ error estimates, and add 'em.
+# This all assumes that our cell volume=0.25 -- in the future, we'll fix this
+
+exec=$( echo $(dirname $0) | sed "s|^\([^\/]\)|$(pwd)/\1|" )
+
+base=fcc
+cell=$base.cell
+volume=0.25
+
+Dij=$base.Dij
+Dij_comp=$Dij.*
+Ylm=$base.Ylm
+# pull off the 00 component:
+Ylm00=$(awk '(NR==2){print $3}' $Ylm)
+
+# needed for getting 00 component of the fourth order term:
+gaussgrid=$exec/gauss.16
+
+C11_2C44=$($exec/elasDij $cell $Dij | awk '(NR==1){print $2+2*$4}')
+
+for i in $Dij_comp ; do
+  # Real space first:
+  C11_2C44_new=$($exec/elasDij $cell $i | awk '(NR==1){print $2+2*$4}')
+  D00=$(awk '(NR==2){print $4}' $i)
+  err_R=$(echo $C11_2C44 $C11_2C44_new $D00 ${i/*./} $volume | awk '{x = 2.*$5*($1-$2)/($3*$4*4); if (x<0) x=-x; print 4*x}')
+  # handle division by zero errors...
+  [ -z "$err_R" ] && err_R=0
+
+  # Fourier space next:
+  Y4lm00=$($exec/gauss-grid ${gaussgrid/*./} $gaussgrid | $exec/fourthorder-FT $cell $Ylm $i - -y | $exec/harmonic $gaussgrid - -m 0 | $exec/symm-harm $cell - | awk '(NR==2){print $3}')
+  err_k=$(echo $Ylm00 $Y4lm00 ${i/*./} | awk '{x=4.9*$2/($1*$3*$3); if (x<0) x=-x; print 4*x;}')
+  # handle division by zero errors...
+  [ -z "$err_k" ] && err_k=0
+
+  err=$(echo $err_R $err_k | awk '{print $1+$2}')
+
+  echo ${i/*./} $err $err_R $err_k
+done

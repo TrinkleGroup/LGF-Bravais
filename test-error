@@ -1,0 +1,16 @@
+#!/bin/tcsh
+
+set testset = (10 20 40 80 160 320 640 1280 2560 5120)
+set R = 10
+set MEMORY = 1024
+set testfunc = ./test-disc
+
+foreach i ($testset)
+  echo $i `$testfunc $i $R -i | tail -1 | awk '{print $4}'`
+end
+
+echo "& # with correction:"
+
+foreach i ($testset)
+  echo $i `$testfunc $i $R -ic | tail -1 | awk '{print $4}'`
+end

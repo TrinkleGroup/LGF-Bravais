@@ -1,0 +1,11 @@
+#!/bin/tcsh
+
+# little code to produce a set of random seeds from urandom;
+# generates 128 long integers
+
+dd if=/dev/urandom count=1 | hexdump -d | head -32 | \
+  awk '{if ($2>32767) a=$2-65536; else a=$2; n1 = a*65536+$3;\
+        if ($4>32767) a=$4-65536; else a=$4; n2 = a*65536+$5;\
+        if ($6>32767) a=$6-65535; else a=$6; n3 = a*65536+$7;\
+        if ($8>32767) a=$8-65535; else a=$8; n4 = a*65536+$9;\
+        printf("%ld %ld %ld %ld\n", n1, n2, n3, n4);}'

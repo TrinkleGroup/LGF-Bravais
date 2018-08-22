@@ -1,0 +1,64 @@
+#!/bin/bash
+function printusage () {
+  cat << EOF 1>&2
+Usage: $(basename $0) [-k <kptsize>] [-d <dest>] [-r <name>] [-s] <cell> <potfile>
+  Sets up a random Dij run in directory <dest> using <cell> and <potfile>
+  -k: set kptmesh for run; note: passed to make (default in $makefile)
+  -d: set destination directory (default: $DEST)
+  -r: use mktemp to make a random subdir of <dest> to run in (name.XXX)
+  -s: do all the set up, but don't actually run job
+N.B.: ALL options must come BEFORE arguments.
+EOF
+  [ "$HELP" == "help" ] && exit 0       # clean exit if looking for help
+  exit 1
+}
+
+function verbecho () { [ "$VERBOSE" ] && echo $*; }     # echo if verbose
+
+# Sets up and launches the run.
+exec=$( echo $(dirname $0) | sed "s|^\([^\/]\)|$(pwd)/\1|" )	# gets absolute path
+makefile=$exec/dij.makefile
+[ -e $makefile ] || { echo "No dij.makefile in $exec \?" 1>&2 ; exit 2; }
+
+DEST=.
+while getopts hvsr:d:k: options ; do
+  case $options in
+    d) DEST=$OPTARG ;;
+    k) KPTMESH=$OPTARG ;;
+    s) SETUP=setup ;;
+    r) RAND=$OPTARG ;;
+    v) VERBOSE=verbose ;;
+    h) HELP=help ;;	# usage
+    \?) HELP=error ;;	# bad parameter
+  esac
+done
+shift $((OPTIND-1))	# strip out our leading options
+cell=$1
+potfile=$2
+
+[ ${HELP:+1} ] || [ -z "$potfile" ] && printusage
+[ ! -e $cell ] || [ ! -e $potfile ] && { echo "Cannot open $cell or $potfile" 1>&2 ; exit 4; }
+
+# equivalent to :h:r in tcsh...
+basename=$(basename $cell)
+basename=${basename/.*/}
+[ "$RAND" ] && DEST=$(mktemp -d "$DEST/$RAND.XXXXXX")
+[ -e "$DEST" ] || mkdir -p $DEST
+
+echo "Setting up directory $DEST"
+
+cp $cell $DEST
+cp $potfile $DEST/$basename.pot
+ln -s $exec/dij.makefile $DEST/makefile
+makeparam="base=$basename cell=$cell"
+[ "$KPTMESH" ] && makeparam="$makeparam kptsize=$KPTMESH"
+verbecho "#cell= $cell"
+verbecho "#DEST= $DEST"
+echo "command: make $makeparam"
+
+if [ -z $SETUP ]; then
+  oldwd=$(pwd)
+  cd $DEST
+  make $makeparam 2>&1 | tee make.dump
+  cd $oldwd
+fi

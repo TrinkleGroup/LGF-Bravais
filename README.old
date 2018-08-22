@@ -1,0 +1,128 @@
+  What do all these different programs do?
+
+
+egf-FT <cell> <grid>
+  Calculates the fourier transform of the elastic GF for each point in
+  <grid>.  We don't put the 1/k^2 piece in, so we end up with just the
+  directionality piece.
+
+elastic-greens <cell> <grid>
+  Calculates the elastic GF for each point in <grid>.  We don't put
+  the 1/R piece in, so we end up with just the directionality piece.
+
+eval-greens <GF-grid> <points>
+  An interpolation scheme for the real part of the GF using a
+  triangular grid.  Obsolete.
+
+func <grid>
+  Test program designed to output a function at each grid point
+
+gauss <N>
+  Outputs gaussian quadrature points and weights from -1 to 1.
+
+gauss-grid <Nphi> <gauss.N>
+  Outputs a (theta,phi) grid that's uniform in phi and uses gaussian
+  quadrature points for theta = acos(x_i).
+
+  (Note: gauss + gauss-grid are used with harmonic to produce the
+  spherical harmonic expansion for a function by integration)
+  
+gf-disc <cell> <Gk(lm)> <GL(R)> <rel_tol>
+  Takes in a cell, the spherial harmonic expansion of the elastic GF,
+  and the lattice GF evaluated at a series of lattice points and
+  computes the discretization correction of the lattice GF at the same
+  set of points.  It only outputs those corrections which are larger
+  than the rel_tol limit.  The output also contains the parameter
+  kmax, which is the size of a sphere inscribed in the BZ.
+
+gf-phonon <cell> <Gk(lm)> <Gd(R)> <kpts>
+  Takes in a cell, the spherial harmonic expansion of the elastic GF,
+  and the discretization correction of the lattice GF from gf-disc
+  and computes the G(k) for each k-point, and diagonalizes it to get
+  phonon frequencies.  Note: this uses the atomic mass in <cell>
+
+harmonic-inter <Ylm> <grid>
+  Take in a spherical harmonic expansion for a function and a grid of
+  points, and evaluate the function on the grid.
+
+harmonic <gauss.J> <grid.IJ>
+  Takes a list of gaussian quadrature points and weights, and a
+  (theta, phi) grid of points with a function evaluated at each point,
+  and produces the spherical harmonic expansion of the function.
+  Note: the grid.IJ points must be consistent with gauss.J to make
+  *any* sense.
+
+  --Basically, to produce a Ylm expansion, here's what you do:
+    gauss N > gauss.N  # We need this file twice, so we dump it...
+    gauss-grid N gauss.N | <function evaluation program> - | \
+      harmonic gauss.N - > func.Ylm.NN
+
+make-ball <cell> <Rcut>
+  Makes a ball of atoms out to radius Rcut.  Sorted by magnitude.
+
+phonon --
+  Defunct, and fatally flawed.  Do NOT use.
+
+point-to-maple <grid>
+  Takes a function on a square (theta, phi) grid and outputs maple
+  input to plot the function in 3-space.
+
+real-GF <cell> <Gk(lm)> <points>
+  Takes a spherical harmonic expansion of the FT of the GF and
+  evaluates the GF at a series of points in real space.  The points
+  are specified as lattice points.  *Includes* the 1/R piece; if given
+  (0,0,0), it returns 0s.
+
+semicont <cell> <Gk(lm)> <Rcut> <R1> <R2> <R3>
+  Somewhat defunct calculation method--determines semicontinuum piece
+  of the GF in *real* space for a given point.  Evaluates over the
+  entire BZ using a combination of spherical integral and monte
+  carlo.  This is really only useful if you want to get a "good" value
+  for the EGF at R=0:  ./semicont cell Ylm-k 0 0 0 0 -m 1000000
+  The -m parameter determines how many points to use in the MC
+  integration; we may fix this later to be a tolerance instead...
+
+test-gsl
+test-int
+  Two routines to test some aspects of the GSL :)
+
+
+====
+So suppose you wanted to calculate the phonons for a given cell using
+*just* the elastic GF.  Here's how you do it.
+
+1. Generate the Ylm expansion of the elastic GF in k-space:
+
+  gauss N > gauss.N
+  gauss-grid N gauss.N | egf-FT cell - | harmonic gauss.N - > cell.Ylm-k.NN
+
+
+2. Generate the "lattice" GF by evaluating the elastic GF in real
+   space for a sphere:
+
+  a. Evaluate R=0 term:
+
+  semicont cell cell.Ylm-k.NN 0 0 0 0 -m 1048576 | \
+    awk -f fix-single.awk > cell.lattice.Rcut
+
+  b. Evaluate out to Rcut:
+
+  make-ball cell Rcut | real-GF cell cell.Ylm-k.NN - >> cell.lattice.Rcut
+
+  c. Fix the format of cell.lattice.Rcut (i.e., remove the 0 0 0 line
+     from real-GF and replace with the line from semicont)
+
+
+3. Generate the discretization correction for our GF:
+
+  gf-disc cell cell.Ylm-k.NN cell.lattice.Rcut 0 > cell.disc.Rcut
+
+
+4. Calculate the phonons:
+
+  gf-phonon cell cell.Ylm-k.NN cell.disc.Rcut kpath > cell.freq
+
+And we're done!  So the parameters that go into this calc are our cell
+geometry, and then we have to decide how far out to take Rcut and what
+grid to use to evaluate the Ylm expansion.  The other "hidden"
+parameter is the envelope function used to do the semicontinuum piece.

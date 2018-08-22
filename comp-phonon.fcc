@@ -1,0 +1,58 @@
+#!/bin/bash
+# onintr cleanup
+
+function doanalysis () {
+#  theta0=$(sed -n '1p' $output | awk '{print $1}')
+#  theta2=$(sed -n '2p' $output | awk '{print $1}')
+#  rms=$(tail -n 1 $output | awk '{print $1}')
+#  echo "${i/*./} $theta0 $theta2 $rms"
+  echo -n ${i/*./}
+  awk '(NR<3){printf " %.8lf", $1}{last=$1}END{printf " %.8lf\n", last}' $output
+}
+
+basename=fcc
+exec=$( echo $(dirname $0) | sed "s|^\([^\/]\)|$(pwd)/\1|" )
+cell=$basename.cell
+basephonon=$basename.phonon.grid
+Dij=$basename.Dij
+disc=$basename.disc
+hyb=$basename.hyb
+Ylm=$basename.Ylm
+kpt=$exec/$basename.kpt.s10
+
+supercells=super.*
+# Dij_comp=($basename.Dij.*)
+# LGF_comp=($basename.disc*)
+
+output=$(mktemp "out.XXXXXX")
+
+echo "n theta0 theta2 rms : errors"
+echo "Dij comparison"
+$exec/phononDij $cell $Dij $kpt >| $basephonon
+for s in $supercells ; do
+  i=$Dij.${s/*./}
+  $exec/phononDij $cell $i $kpt | $exec/anal-phonon $kpt $basephonon - >| $output
+  doanalysis
+done
+
+echo "LGF comparison"
+# try comparing to the "true" phonons instead...
+# $exec/gf-phonon $cell $Ylm $disc $kpt >| $basephonon
+for s in $supercells ; do
+  i=$disc.${s/*./}
+  $exec/gf-phonon $cell $Ylm $i $kpt | $exec/anal-phonon $kpt $basephonon - >| $output
+  doanalysis
+done
+
+
+echo "Hybrid comparison"
+# we don't bother recalculating basephonon...
+# $exec/gf-phonon $cell $Ylm $hyb.20 $kpt >| $basephonon
+for s in $supercells ; do
+  #  (( ${s/*./} == 1 )) && continue	# don't do for single supercells...
+  i=$hyb.${s/*./}
+  $exec/gf-phonon $cell $Ylm $i $kpt | $exec/anal-phonon $kpt $basephonon - >| $output
+  doanalysis
+done
+
+\rm $output

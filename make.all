@@ -1,0 +1,206 @@
+#!/bin/tcsh
+
+## if we're interrupted, we cleanup our mess
+onintr cleanup
+
+## This is my attempt to search through many many random Dij's till we
+## find a stable one, using the two stability criteria...
+
+## where all the executables are
+# set exec = $HOME/work/GFBC/EGF
+set exec = $0:h
+set echoit = echo
+set timeit = /usr/bin/time
+# set echoit = $HOME/bin/slowecho
+## scripts:
+set graceit = $exec/sc-graceit
+set phonongraceit = $exec/phonon-graceit
+set errgraceit = $exec/err-graceit
+set compphonon = $exec/comp-phonon
+set quaderror = $exec/quad-error
+
+## input files
+set base = sc
+set cell = $base.cell
+set potfile = $base.pot
+set kpttest = $exec/sc.kpt.8
+
+## output files
+set potasmfile = $base.asm
+set Dij = $base.Dij
+set Cij = $base.Cij
+set phonon = $base.phonon
+set spectra = $base.agr
+set spectralatt = $base.latt.agr
+set Ylm = $base.Ylm
+set Ylmdisc = $base.Ylm-disc
+set elas = $base.elas
+set disc = $base.disc
+set disckpt = $exec/sc.kpt.120
+set discelas = $base.disc.elas
+set latt = $base.latt
+set diff = $base.lgf-elas
+set relerr = $base.err.rel
+set phononout = $base.err.phonon
+set phononsummary = $base.err.phonon.agr
+set errDij = $base.err.Dij
+set quadout = $base.err.quad
+set quartic = $base.err.quartic
+set errsummary = $base.err.rel.agr
+
+## parameters for generating our Dij
+## input from $potfile
+set pot = `head -1 $potfile`  # passed directly to compile
+set potname = `head -3 $potfile | tail -1` # functional form of potential
+set Ylmgrid = 128 # for calculating the elastic GF
+set potsize = `head -2 $potfile | tail -1`
+set potballfile = `mktemp "pot.XXXXXX"`
+$exec/make-ball $cell $potsize >! $potballfile
+
+# set ballsize = 10.01
+set ballsize = `head -4 $potfile | tail -1`
+set ballfile = `mktemp "ball.XXXXXX"`
+$exec/make-ball $cell $ballsize >! $ballfile
+
+## supercell construction:
+set superindices = (1 2 3 4 5 6 7 8 9 10 12 14 16 18)
+foreach i ($superindices)
+    set file = `echo $i | awk '{printf("super.%02d", $1)}'`
+    if (! -e $file) then
+	echo "$i 0 0 0 $i 0 0 0 $i" > $file
+    endif
+end
+set supercells = (super.*)
+
+######################################################################
+echo "Started" `date` "..."
+echo "-----------------------------"
+echo "Read potential from $potfile"
+echo "Potential function:        $pot"
+echo "Potential cutoff:          $potsize"
+echo "Potential functional form: $potname"
+echo "GF cutoff:                 $ballsize"
+echo "-----------------------------"
+$echoit "Parsing and compiling $potfile to $potasmfile"
+$exec/compiler $potfile >! $potasmfile
+if ($status != 0) then
+    echo "Had problems compiling...?"
+    goto cleanup
+endif
+
+set stable = 0
+set count = 0
+
+## seeds:
+set seeds = `$exec/make-seed`
+while ($stable == 0)
+    $echoit Count: $count
+    # generate new Dij
+    $exec/randDij $cell $potballfile $potasmfile -c -m $seeds[1]| $exec/symmetrize $cell - -z >! $Dij
+    shift seeds
+    if ($#seeds == 0) set seeds = `$exec/make-seed`
+    if (`cat $Dij | wc -l` <= 1) exit  # bail out now if problems...
+    # check Cij first:
+    $exec/elasDij $cell $Dij -s >! $Cij
+    set stable = `tail -1 $Cij | awk '{print $1}'`
+    if ($stable == 1) then
+	# Passed Cij test
+	echo "  passed Cij"
+	$exec/phononDij $cell $Dij $kpttest -n >! $phonon
+	set smallphonon = `awk 'BEGIN{getline} {print $2; print $3; print $4}' $phonon | sort -n | head -1`
+	echo "  --smallest phonon freq: $smallphonon"
+	set stable = `echo $smallphonon | awk '{if ($1>=0) print 1; else print 0}'`
+	if ($stable == 1) then
+	    echo "  passed phonon"
+	endif
+    endif
+    @ count++
+end
+
+## overwrite cell with new elastic constants:
+$echoit "Creating correct $cell file"
+set len = `cat $cell | wc -l | awk '{print $1-5}'`
+set TMPFILE=`mktemp /tmp/cell.XXXXXX`
+head -4 $cell >! $TMPFILE
+head -1 $Cij >> $TMPFILE
+tail -$len $cell >> $TMPFILE
+\mv $TMPFILE $cell
+
+## generate phonon spectra:
+$echoit "Making Dij phonon spectra: $spectra"
+$timeit $exec/phononDij $cell $Dij $exec/kpt.sc.path -n | $graceit "$potname" - >! $spectra
+
+## calculate the elastic GF:
+$echoit "Calculating elastic GF: $Ylm"
+set gridfile = $exec/gauss.$Ylmgrid
+if (! -e $gridfile) then
+    $exec/gauss $Ylmgrid > $gridfile
+endif
+$timeit $exec/gauss-grid $Ylmgrid $gridfile | $exec/egf-FT $cell - -g | $exec/harmonic $gridfile - >! $Ylm
+$echoit "Calculating the discontinuity correction: $Ylmdisc"
+$timeit $exec/gauss-grid $Ylmgrid $gridfile | $exec/fourthorder-FT $cell $Dij - | $exec/harmonic $gridfile - >! $Ylmdisc
+
+## calculating elastic GF in real space
+$echoit "Calculating elastic GF in real space: $elas and $discelas"
+$timeit $exec/real-GF $cell $Ylm $ballfile >! $elas
+$timeit $exec/gf-disc $cell $Ylm $elas > $discelas
+
+## calculate the lattice GF: (use lookup table)
+$echoit "Calculating lattice GF (discretization correction): $disc"
+$timeit $exec/discDij $cell $Ylm $Ylmdisc $Dij $disckpt $ballfile -l >! $disc
+
+## calculate the difference between LGF and EGF
+$echoit "Calculating the difference between LGF and EGF: $diff"
+$exec/scalelatt $discelas -1 | $exec/addlatt $disc - >! $diff
+$echoit "Calculating the LGF: $latt"
+$exec/addlatt $diff $elas >! $latt
+$echoit "Calculating the relative error: $relerr"
+$exec/difflatt $cell $elas $latt -r | sort -n >! $relerr
+
+## generate phonon spectra:
+$echoit "Making GF phonon spectra: $spectralatt"
+$timeit $exec/gf-phonon $cell $Ylm $disc $exec/kpt.sc.path -n | $graceit "$potname" - >! $spectralatt
+
+## now, construct the folded versions:
+$echoit "Constructing folded Dij and LGF using $supercells"
+set tempfile = `mktemp "temp.XXXXXX"`
+set kmax = `head -1 $disc | awk '{print $2}'`
+foreach s ($supercells)
+    set i = $s:e
+    $echoit "  $Dij.$i"
+    $exec/foldsuper $cell $Dij $s -s >! $Dij.$i
+    $echoit "  $disc.$i"
+    ## this is tricky... we need to fix the first line
+    $exec/foldsuper $cell $diff $s -s | $exec/addlatt - $discelas >! $tempfile
+    sed "s/9 # number of points/$kmax/" $tempfile >! $disc.$i
+end
+
+## phonon analysis:
+$echoit "Calculating phonon errors: $phononout"
+\rm $base.phonon.grid
+$timeit $compphonon >! $phononout
+$echoit "Summarizing phonon errors: $phononsummary"
+$phonongraceit $phononout "$potname" >! $phononsummary
+
+## deviation estimates:
+$echoit "Calculating quadratic errors: $errDij $quadout $quartic"
+set Rmax = `echo $ballsize | awk '{print int($1)}'`
+$exec/errorDij $cell $Dij $Rmax >! $errDij
+$timeit $quaderror >! $quadout
+set ld = `head -1 $disc | awk '{print $(NF)}'`
+echo $Rmax $ld | awk 'BEGIN{dx=0.001} {for (x=1.; x<=($1+0.5*dx); x+=dx) printf("%.5lf %.8le\n", x, $2/(x*x))}' >! $quartic
+$echoit "Summarizing deviations: $errsummary"
+$errgraceit $base "$potname" >! $errsummary
+
+cleanup:
+if ($?potballfile) then
+  \rm $potballfile
+endif
+if ($?ballfile) then
+  \rm $ballfile
+endif
+if ($?tempfile) then
+  \rm $tempfile
+endif
+
+echo "Finished" `date` "."

@@ -1,0 +1,81 @@
+#!/bin/tcsh
+# Shell script to compile a dynamical matrix given an assembly language
+# program to compute elements
+onintr cleanup
+
+set exec = $0:h
+
+## 5 inputs, 1 output
+set cell = $1
+set potsize = $2
+set potasm = $3
+set kpttest = $4
+set maxani = $5
+set Dij = $6
+
+if ("$Dij" == "") then
+    echo "$0 <cell> <cutoff> <pot.asm> <kptset> <max_anisotopy> <Dij-output>"
+    exit 1
+endif
+
+## parameters for generating our Dij
+## input from $potfile
+set potballfile = `mktemp "pot.XXXXXX"`
+$exec/make-ball $cell $potsize >! $potballfile
+
+set Cij = `mktemp "Cij.XXXXXX"`
+set phonon = `mktemp "phonon.XXXXXX"`
+
+set stable = 0
+set count = 0
+set stat = 0
+
+## seeds:
+set seeds = `$exec/make-seed`
+while ($stable == 0)
+    echo Count: $count
+    # generate new Dij
+    # we use -c to smoothly cutoff the dynamical matrix
+    $exec/randDij $cell $potballfile $potasm -c -m $seeds[1]| $exec/symmetrize $cell - -z >! $Dij
+    shift seeds
+    if ($#seeds == 0) set seeds = `$exec/make-seed`
+    if (`cat $Dij | wc -l` <= 1) then  # bail out now if problems...
+	set stat = 1
+	goto cleanup
+    endif
+    # check Cij first: (now done using the anistropy test)
+    #    $exec/elasDij $cell $Dij -s >! $Cij
+    $exec/elasDij $cell $Dij -a >! $Cij
+    set stable = `tail -1 $Cij | awk '{print $1}'`
+    set ani = `head -2 $Cij | tail -1 | awk '{print $1}'`
+    # check the anisotropic ratio:
+    if (`echo $ani $maxani|awk '{if ($1<$2) print 1; else print 0}'` == 0) set stable=0
+    if ($stable == 1) then
+	# Passed Cij test
+	echo "  passed Cij; anisotropic ratio: $ani"
+	$exec/phononDij $cell $Dij $kpttest -n >! $phonon
+	set smallphonon = `awk 'BEGIN{getline} {print $2; print $3; print $4}' $phonon | sort -nr | tail -1`
+	echo "  --smallest phonon freq: $smallphonon"
+	set stable = `echo $smallphonon | awk '{if ($1>=0) print 1; else print 0}'`
+	if ($stable == 1) then
+	    echo "  passed phonon"
+	endif
+    endif
+    @ count++
+end
+
+## overwrite cell with new elastic constants:
+echo "Creating correct $cell file"
+set len = `cat $cell | wc -l | awk '{print $1-5}'`
+set TMPFILE=`mktemp "cell.XXXXXX"`
+head -4 $cell >! $TMPFILE
+head -1 $Cij >> $TMPFILE
+tail -$len $cell >> $TMPFILE
+\mv $TMPFILE $cell
+
+cleanup:
+\rm $potballfile
+\rm $Cij
+\rm $phonon
+
+exit $stat

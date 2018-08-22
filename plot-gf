@@ -1,0 +1,13 @@
+#!/bin/tcsh
+
+set exec = $0:h
+if (-e *.pot) then
+  set file = *.pot
+  set typename = "`head -3 $file[1] | tail -1`"
+else
+  set typename = "??"
+endif
+
+if ("$1" != "") then
+  $exec/gf-phonon sc.cell sc.Ylm $1 $exec/kpt.sc.path -n | $exec/sc-graceit "$typename" - | xmgrace - &
+endif
